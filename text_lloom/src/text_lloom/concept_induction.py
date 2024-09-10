@@ -20,7 +20,7 @@ import re
 
 # Clustering
 from hdbscan import HDBSCAN
-import umap
+import umap.umap_ as umap
 
 # Local imports
 if __package__ is None or __package__ == '':
@@ -126,6 +126,7 @@ def calc_cost(results, model_name, step_name, sess, debug=False):
     # Calculate cost with API results and model name
     if results is None:
         return
+    return
     # Cost estimation
     in_tokens = np.sum([(res.usage.prompt_tokens) if res is not None else 0 for res in results])
     out_tokens = np.sum([(res.usage.completion_tokens) if res is not None else 0 for res in results])

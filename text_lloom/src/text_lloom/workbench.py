@@ -31,15 +31,17 @@ class lloom:
         df: pd.DataFrame,
         text_col: str,
         id_col: str = None,
-        distill_model_name = "gpt-3.5-turbo",
-        embed_model_name = "text-embedding-3-large",
-        synth_model_name = "gpt-4-turbo",
-        score_model_name = "gpt-3.5-turbo",
+        distill_model_name = "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        distill_summarize_model = "google/gemma-2-9b-it",
+        embed_model_name = "FacebookAI/roberta-large",
+        synth_model_name = "google/gemma-2-9b-it",
+        score_model_name = "meta-llama/Meta-Llama-3.1-8B-Instruct",
         rate_limits = {}, # D_i = "model-name": (n_requests, wait_time_secs)
         debug: bool = False,
     ):
         # Settings
         self.distill_model_name = distill_model_name  # Distill operators (filter and summarize)
+        self.distill_summarize_model = distill_summarize_model
         self.embed_model_name = embed_model_name  # Cluster operator
         self.synth_model_name = synth_model_name  # Synthesize operator
         self.score_model_name = score_model_name  # Score operator
@@ -389,7 +391,7 @@ class lloom:
                     text_df=self.df_filtered, 
                     doc_col=self.doc_col,
                     doc_id_col=self.doc_id_col,
-                    model_name=self.distill_model_name,
+                    model_name=self.distill_summarize_model,
                     n_bullets=params["summ_n_bullets"],
                     prompt_template=custom_prompts["distill_summarize"],
                     seed=seed,
@@ -498,7 +500,11 @@ class lloom:
         self.select_widget = w
         return w
 
-    async def select_auto(self, max_concepts):
+    async def select_auto(self, max_concepts, all=False):
+        if all: 
+            # Activate all concepts
+            for c_id, c in self.concepts.items():
+                self.concepts[c_id].active = True
         # Select the best concepts up to max_concepts
         selected_concepts = await review_select(self.concepts, max_concepts, self.synth_model_name, self.rate_limits)
 

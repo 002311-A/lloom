@@ -11,9 +11,13 @@ from pathos.multiprocessing import Pool
 import hashlib
 import numpy as np
 import os
+import torch
+from transformers import pipeline
 
 import asyncio
 import tiktoken
+from datasets import Dataset
+import tqdm
 
 # OPENAI setup =============================
 import openai
@@ -28,6 +32,10 @@ embed_client = OpenAI(
     api_key=os.environ.get("OPENAI_API_KEY"),
 )
 
+LOCAL_MODE = True
+
+    
+
 # CONSTANTS ================================
 SYS_TEMPLATE = "You are a helpful assistant who helps with identifying patterns in text examples."
 
@@ -38,7 +46,12 @@ RATE_LIMITS = {
     "gpt-4": (20, 10),  # = 20*6 = 120 rpm
     "gpt-4-turbo-preview": (20, 10),  # = 20*6 = 120 rpm
     "gpt-4-turbo": (20, 10),  # = 20*6 = 120 rpm
-    "gpt-4o": (20, 10)  # = 20*6 = 120 rpm
+    "gpt-4o": (20, 10),  # = 20*6 = 120 rpm
+    "meta-llama/Meta-Llama-3.1-8B-Instruct": (300, 0.1),
+    "meta-llama/Meta-Llama-3.1-70B-Instruct": (300, 0.1),
+    "google/gemma-2-27b-it": (300, 0.1),
+    "google/gemma-2-9b-it": (300, 0.1),
+    "microsoft/Phi-3.5-mini-instruct" : (300, 0.1),
 }
 
 CONTEXT_WINDOW = {
@@ -58,21 +71,35 @@ COSTS = {
     "gpt-4-turbo-preview": [0.01/1000, 0.03/1000],
     "gpt-4-turbo": [0.01/1000, 0.03/1000],
     "gpt-4o": [0.005/1000, 0.015/1000],
+    "meta-llama/Meta-Llama-3.1-8B-Instruct": (0.0/1),
+    "meta-llama/Meta-Llama-3.1-70B-Instruct": (300, 0.1),
+    "google/gemma-2-27b-it": (300, 0.1),
+    "google/gemma-2-9b-it": (300, 0.1),
+    "microsoft/Phi-3.5-mini-instruct": (300, 0.1),
+    
 }
 
 EMBED_COSTS = {
     "text-embedding-ada-002": (0.00010/1000),
     "text-embedding-3-small": (0.00002/1000),
     "text-embedding-3-large": (0.00013/1000),
+    "meta-llama/Meta-Llama-3.1-8B-Instruct": (0.0/1),
+    "FacebookAI/roberta-large": (0/1),
+    "meta-llama/Meta-Llama-3.1-70B-Instruct": (300, 0.1),
+    "google/gemma-2-27b-it": (300, 0.1),
+    "google/gemma-2-9b-it": (300, 0.1),
 }
 
 EMBED_MAX_BATCH_SIZE = {
     "text-embedding-ada-002": 2048,
     "text-embedding-3-small": 2048,
     "text-embedding-3-large": 2048,
+    "FacebookAI/roberta-large": 32,
 }
 
 def get_token_estimate(text, model_name):
+    if LOCAL_MODE:
+        return 0
     # Fetch the number of tokens used by a prompt
     encoding = tiktoken.encoding_for_model(model_name)
     tokens = encoding.encode(text)
@@ -97,6 +124,8 @@ def truncate_text_tokens(text, model_name, max_tokens):
     return text, n_tokens
 
 def calc_cost_by_tokens(model_name, in_tokens, out_tokens):
+    if LOCAL_MODE:
+        return 0, 0
     # Calculate cost with the tokens and model name
     in_cost = in_tokens * COSTS[model_name][0]
     out_cost = out_tokens * COSTS[model_name][1]
@@ -179,29 +208,65 @@ def truncate_prompt(prompt, model_name, out_token_alloc):
     return prompt
 
 # Internal function making calls to LLM; runs a single LLM query
-async def multi_query_gpt(model_name, prompt_template, arg_dict, batch_num=None, wait_time=None, temperature=0, debug=False):
-    if wait_time is not None:
-        if debug:
-            print(f"Batch {batch_num}, wait time {wait_time}")
-        await asyncio.sleep(wait_time)  # wait asynchronously
-
+async def multi_query_gpt(model_name, prompt_template, arg_dict, batch_num=None, wait_time=None, temperature=1e-3, debug=False):
     try: 
-        prompt = prompt_template.format(**arg_dict)
-        res = await base_api_wrapper(prompt, model_name, temperature)
+        if LOCAL_MODE:
+            prompt = prompt_template.format(**arg_dict)
+            res = base_local_wrapper(prompt, model_name, temperature)
+        else:
+            prompt = prompt_template.format(**arg_dict)
+            res = await base_api_wrapper(prompt, model_name, temperature)
     except Exception as e:
         print("Error", e)
         return None
     
     return res
 
+def multi_query_local(model_name, prompt_template, arg_dict_list, batch_num=None, wait_time=None, temperature=1e-3, debug=False):
+    tasks = [prompt_template.format(**args) for args in arg_dict_list]
+    # Initialize the progress bar
+    with tqdm.tqdm(total=len(tasks), desc="Processing tasks") as pbar:
+        if "gemma" in model_name:
+            gemma_pipe = pipeline("text-generation", model='google/gemma-2-9b-it', torch_dtype=torch.bfloat16, device="cuda:0")
+            tasks = [[{"role": "user", "content": SYS_TEMPLATE + ' ' + task}] for task in tasks]
+            res = []
+            for i in range(0, len(tasks)):  # Process in batches of 4
+                batch = tasks[i]
+                res.append(gemma_pipe(batch, max_new_tokens=1024, min_new_tokens=5))
+                pbar.update(len(batch))
+        elif "llama" in model_name:
+            llama_pipe = pipeline("text-generation", model='meta-llama/Meta-Llama-3.1-8B-Instruct', torch_dtype=torch.bfloat16, device="cuda:0")
+            llama_pipe.tokenizer.pad_token_id = llama_pipe.model.config.eos_token_id[0]
+            tasks = [[{"role": "system", "content": SYS_TEMPLATE}, {"role": "user", "content": task}] for task in tasks]
+            res = []
+            for i in range(0, len(tasks), 16):  # Process in batches of 4
+                batch = tasks[i:i+16]
+                res.extend(llama_pipe(batch, max_new_tokens=4096, temperature=1e-3, pad_token_id=llama_pipe.tokenizer.eos_token_id, batch_size=16, min_new_tokens=5))
+                pbar.update(len(batch))
+        else:
+            pipe = pipeline("text-generation", model=model_name, torch_dtype=torch.bfloat16, device="cuda:0")
+            tasks = [[{"role": "system", "content": SYS_TEMPLATE}, {"role": "user", "content": task}] for task in tasks]
+            res = []
+            for i in range(0, len(tasks), 4):
+                batch = tasks[i:i+4]
+                res.extend(pipe(batch, max_new_tokens=4096, temperature=1e-3, pad_token_id=pipe.tokenizer.eos_token_id, batch_size=4, min_new_tokens=5))
+                pbar.update(len(batch))
+    return res
+
 def get_res_str(res):
     # Fetch the response string OpenAI response JSON
     return res.choices[0].message.content
 
+def get_res_str_local(res):
+    return res[0]['generated_text'][-1]['content']
+
 def process_results(results):
     # Extract just the text generations from response JSONs
     # Insert None if the result is None
-    res_text = [(get_res_str(res) if res else None) for res in results]
+    if LOCAL_MODE:
+        res_text = [(get_res_str_local(res) if res else None) for res in results]
+    else:
+        res_text = [(get_res_str(res) if res else None) for res in results]
     return res_text
 
 async def multi_query_gpt_wrapper(prompt_template, arg_dicts, model_name, rate_limits=None, temperature=0, batch_num=None, batched=True, debug=False):
@@ -227,29 +292,43 @@ async def multi_query_gpt_wrapper(prompt_template, arg_dicts, model_name, rate_l
                 wait_time = wait_time_secs * batch_num
             if debug:
                 wait_time = 0 # Debug mode
-            cur_tasks = [multi_query_gpt(model_name, prompt_template, arg_dict=args, batch_num=batch_num, wait_time=wait_time, temperature=temperature) for args in cur_arg_dicts]
+            if LOCAL_MODE:
+                cur_tasks = multi_query_local(model_name, prompt_template, cur_arg_dicts, batch_num=batch_num, wait_time=wait_time, temperature=temperature)
+            else:
+                cur_tasks = [multi_query_gpt(model_name, prompt_template, arg_dict=args, batch_num=batch_num, wait_time=wait_time, temperature=temperature) for args in cur_arg_dicts]
             tasks.extend(cur_tasks)
-
-    res_full = await asyncio.gather(*tasks)
+    if not LOCAL_MODE:
+        res_full = await asyncio.gather(*tasks)
+    else:
+        res_full = tasks
 
     res_text = process_results(res_full)
     return res_text, res_full
 
 def get_embeddings(embed_model_name, text_vals):
-    # Gets OpenAI embeddings
-    # replace newlines, which can negatively affect performance.
-    text_vals_mod = [text.replace("\n", " ") for text in text_vals]
 
-    # Avoid hitting maximum embedding length.
-    num_texts = len(text_vals_mod)
-    chunk_size = EMBED_MAX_BATCH_SIZE[embed_model_name]
-    chunked_text_vals = np.array_split(text_vals_mod, np.arange(
-        chunk_size, num_texts, chunk_size))
-    embeddings = []
-    for chunk_text_vals in chunked_text_vals:
-        resp = embed_client.embeddings.create(
-            input=chunk_text_vals,
-            model=embed_model_name,
-        )
-        embeddings += [r.embedding for r in resp.data]
+    if LOCAL_MODE:
+        text_vals_mod = [text.replace("\n", " ") for text in text_vals]
+        # Use HuggingFace feature extraction pipeline for local mode
+        pipe = pipeline("feature-extraction", model=embed_model_name, device_map="auto", framework="pt", return_tensors=True)
+        embeddings = pipe(text_vals, return_tensors=True)
+        embeddings = [torch.mean(embedding, axis=1).squeeze(0) for embedding in embeddings if len(embedding) > 0]        
+        embeddings = torch.stack(embeddings, axis=0)
+    else:
+        # Gets OpenAI embeddings
+        # replace newlines, which can negatively affect performance.
+        text_vals_mod = [text.replace("\n", " ") for text in text_vals]
+
+        # Avoid hitting maximum embedding length.
+        num_texts = len(text_vals_mod)
+        chunk_size = EMBED_MAX_BATCH_SIZE[embed_model_name]
+        chunked_text_vals = np.array_split(text_vals_mod, np.arange(
+            chunk_size, num_texts, chunk_size))
+        embeddings = []
+        for chunk_text_vals in chunked_text_vals:
+            resp = embed_client.embeddings.create(
+                input=chunk_text_vals,
+                model=embed_model_name,
+            )
+            embeddings += [r.embedding for r in resp.data]
     return np.array(embeddings)

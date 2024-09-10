@@ -3,7 +3,7 @@ filter_prompt = """
 I have the following TEXT EXAMPLE:
 {ex}
 
-Please extract {n_quotes} QUOTES exactly copied from this EXAMPLE that are {seeding_phrase}. Please respond ONLY with a valid JSON in the following format:
+Please extract {n_quotes} QUOTES exactly copied from this EXAMPLE. Where possible, choose ones that are {seeding_phrase}. Please respond ONLY with a valid JSON in the following format:
 {{
     "relevant_quotes": [ "<QUOTE_1>", "<QUOTE_2>", ... ]
 }}
@@ -15,7 +15,7 @@ summarize_prompt = """
 I have the following TEXT EXAMPLE:
 {ex}
 
-Please summarize the main point of this EXAMPLE {seeding_phrase} into {n_bullets} bullet points, where each bullet point is a {n_words} word phrase. Please respond ONLY with a valid JSON in the following format:
+Please summarize the main point of this EXAMPLE into {n_bullets} bullet points, where each bullet point is a {n_words} word phrase. Where possible, provide ones that are {seeding_phrase}. Please ALWAYS respond ONLY with a valid JSON in the following format:
 {{
     "bullets": [ "<BULLET_1>", "<BULLET_2>", ... ]
 }}
