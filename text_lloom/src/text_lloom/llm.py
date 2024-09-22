@@ -232,16 +232,16 @@ def multi_query_local(model_name, prompt_template, arg_dict_list, batch_num=None
             res = []
             for i in range(0, len(tasks)):  # Process in batches of 4
                 batch = tasks[i]
-                res.append(gemma_pipe(batch, max_new_tokens=1024, min_new_tokens=5))
+                res.append(gemma_pipe(batch, max_new_tokens=2056, min_new_tokens=5))
                 pbar.update(len(batch))
         elif "llama" in model_name:
             llama_pipe = pipeline("text-generation", model='meta-llama/Meta-Llama-3.1-8B-Instruct', torch_dtype=torch.bfloat16, device="cuda:0")
             llama_pipe.tokenizer.pad_token_id = llama_pipe.model.config.eos_token_id[0]
             tasks = [[{"role": "system", "content": SYS_TEMPLATE}, {"role": "user", "content": task}] for task in tasks]
             res = []
-            for i in range(0, len(tasks), 16):  # Process in batches of 4
+            for i in range(0, len(tasks), 16):  # Process in batches of 16
                 batch = tasks[i:i+16]
-                res.extend(llama_pipe(batch, max_new_tokens=4096, temperature=1e-3, pad_token_id=llama_pipe.tokenizer.eos_token_id, batch_size=16, min_new_tokens=5))
+                res.extend(llama_pipe(batch, max_new_tokens=512, temperature=1e-3, pad_token_id=llama_pipe.tokenizer.eos_token_id, batch_size=16, min_new_tokens=5))
                 pbar.update(len(batch))
         else:
             pipe = pipeline("text-generation", model=model_name, torch_dtype=torch.bfloat16, device="cuda:0")

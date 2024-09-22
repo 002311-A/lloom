@@ -305,7 +305,7 @@ def dict_to_json(examples):
 # Output: 
 # - concepts: dict (concept_id -> concept dict)
 # - concept_df: DataFrame (columns: doc_id, doc, concept_id, concept_name, concept_prompt)
-async def synthesize(cluster_df, doc_col, doc_id_col, model_name, cluster_id_col="cluster_id", concept_col_prefix="concept", n_concepts=None, batch_size=None, verbose=False, pattern_phrase="unifying pattern", dedupe=True, prompt_template=None, seed=None, sess=None, return_logs=False):
+async def synthesize(cluster_df, doc_col, doc_id_col, model_name, cluster_id_col="cluster_id", concept_col_prefix="concept", n_concepts=None, batch_size=None, verbose=False, pattern_phrase="expressed idea", dedupe=True, prompt_template=None, seed=None, sess=None, return_logs=False):
     # Synthesis operates on "doc" column for each cluster_id
     # Concept object is created for each concept
     start = time.time()

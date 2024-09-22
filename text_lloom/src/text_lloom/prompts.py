@@ -40,9 +40,7 @@ review_remove_prompt = """
 I have this set of themes generated from text examples:
 {concepts}
 
-Please identify any themes that should be REMOVED because they are either:
-(1) Too specific/narrow and would only describe a few examples, or 
-(2) Too generic/broad and would describe nearly all examples.
+Please identify any themes that should be REMOVED because they are either too generic/broad and would describe nearly all examples.
 If there no such themes, please leave the list empty.
 Please respond ONLY with a valid JSON in the following format:
 
@@ -99,7 +97,7 @@ review_select_prompt = """
 I have this set of themes generated from text examples:
 {concepts}
 
-Please select AT MOST {max_concepts} themes to include in the final set of themes. These themes should be the highest quality themes in the set: (1) NOT too generic or vague (should not describe most examples), (2) NOT too specific (should not only describe a small set of examples), and (3) NOT overlapping with other selected themes (they should capture a range of different patterns).
+Please select AT MOST {max_concepts} themes to include in the final set of themes. These themes should be the highest quality themes in the set: (1) NOT too generic or vague (should not describe most examples) and (2) NOT overlapping with other selected themes (they should capture a range of different patterns).
 Please respond ONLY with a valid JSON in the following format:
 
 {{

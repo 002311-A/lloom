@@ -406,7 +406,7 @@ class lloom:
             # Just use filtered df to generate concepts
             self.df_bullets = self.df_filtered
         
-        df_cluster_in = df_bullets
+        df_cluster_in = self.df_bullets ### NOTE: original code had bug (called df_bullets, NOT self.df_bullets)
         synth_doc_col = self.doc_col
         synth_n_concepts = params["synth_n_concepts"]
         concept_col_prefix = "concept"
